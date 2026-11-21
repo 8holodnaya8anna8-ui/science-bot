@@ -1,13 +1,10 @@
-"""Подборка новых научных статей по психологии и нейронауке -> Telegram.
 
-Берёт свежие записи из RSS-лент, делает краткий пересказ на русском
-(через Gemini, если есть ключ) и отправляет в Telegram.
-Если перевод не получился, отправляет оригинальные заголовки со ссылками.
-"""
 import json
 import os
 import re
+import time
 import html
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -31,10 +28,24 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 UA = {"User-Agent": "Mozilla/5.0 (science-digest-bot)"}
 
 
-def http(url, data=None, headers=None):
-    req = urllib.request.Request(url, data=data, headers=headers or UA)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+def http(url, data=None, headers=None, tries=5):
+    """Запрос с повторными попытками: иногда соединение обрывается случайно."""
+    last = None
+    for n in range(tries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers or UA)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500 and e.code != 429:  # ошибка в данных, повтор не поможет
+                print(f"HTTP {e.code}: {e.read().decode(errors='ignore')[:300]}")
+                raise
+            last = e
+        except Exception as e:
+            last = e
+        print(f"Попытка {n + 1} не удалась: {type(last).__name__}")
+        time.sleep(3 * (n + 1) ** 2)  # 3, 12, 27, 48 секунд
+    raise last
 
 
 def clean(text, limit=500):
